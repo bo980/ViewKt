@@ -1,0 +1,8 @@
+<resources>
+    <declare-styleable name="CardView">
+        <attr name="cardElevation" format="dimension" />
+        <attr name="cardCornerRadius" format="dimension" />
+        <attr name="cardShadowColor" format="color" />
+        <attr name="cardBackgroundColor" format="color" />
+    </declare-styleable>
+</resources>
