@@ -6,42 +6,41 @@ import android.content.res.ColorStateList
 import android.graphics.*
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
-import android.os.Build
 import android.util.AttributeSet
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import androidx.core.graphics.drawable.DrawableCompat
-import com.liang.cardview.CardView
+import androidx.core.content.ContextCompat
 import com.liang.cardview.R
 
 
 /**
  * TODO: document your custom view class.
  */
+@SuppressLint("NewApi")
 class CardView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
 ) : FrameLayout(context, attrs, defStyleAttr) {
-    private val colorBackgroundAttr = intArrayOf(android.R.attr.colorBackground)
 
+    private var useClipToOutline = true
+    private var sight = 0
+
+    private val contentPadding = Rect()
     private val paint by lazy {
-        Paint().apply {
-            style = Paint.Style.FILL_AND_STROKE
-            isAntiAlias = true
-        }
+        Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
     }
 
-    private val backgroundDrawable by lazy {
+    private val roundRectDrawable by lazy {
         GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
         }
     }
 
-    private val roundRectView = RoundRectView(context)
-
-    var cardCornerRadius: Float = 50F
+    var cardCornerRadius: Float = 0F
         set(value) {
             field = value
+            roundRectDrawable.cornerRadius = value
             postInvalidate()
         }
 
@@ -51,20 +50,21 @@ class CardView @JvmOverloads constructor(
             postInvalidate()
         }
 
-    var cardElevation: Int = 20
+    var cardElevation: Int = 0
         set(value) {
             field = value
             postInvalidate()
         }
 
-    var cardBackgroundColor: Int = 0
+    var cardBackgroundColor: ColorStateList = ColorStateList.valueOf(Color.TRANSPARENT)
         set(value) {
-            field = value
-            postInvalidate()
+            if (field != value) {
+                field = value
+                roundRectDrawable.color = value
+            }
         }
 
     init {
-        super.addView(roundRectView, 0, LayoutParams(-2, -1))
         init(attrs, defStyleAttr)
     }
 
@@ -76,38 +76,46 @@ class CardView @JvmOverloads constructor(
         cardCornerRadius =
             a.getDimensionPixelSize(R.styleable.CardView_cardCornerRadius, 0).toFloat()
         cardElevation = a.getDimensionPixelSize(R.styleable.CardView_cardElevation, 5)
-        cardBackgroundColor =
-            a.getColor(R.styleable.CardView_cardBackgroundColor, Color.TRANSPARENT)
+
         cardShadowColor = a.getColor(R.styleable.CardView_cardShadowColor, Color.GRAY)
 
-        val backgroundColor = if (a.hasValue(R.styleable.CardView_cardBackgroundColor)) {
-            a.getColorStateList(R.styleable.CardView_cardBackgroundColor)
-        } else { // There isn't one set, so we'll compute one based on the theme
-            val aa =
-                context.obtainStyledAttributes(colorBackgroundAttr)
-            val themeColorBackground = aa.getColor(0, 0)
-            aa.recycle()
-            // If the theme colorBackground is light, use our own light color, otherwise dark
-            val hsv = FloatArray(3)
-            Color.colorToHSV(themeColorBackground, hsv)
-            ColorStateList.valueOf(
-                if (hsv[2] > 0.5f) resources.getColor(R.color.cardview_light_background) else resources.getColor(
-                    R.color.cardview_dark_background
-                )
-            )
+        if (a.hasValue(R.styleable.CardView_cardBackgroundColor)) {
+            cardBackgroundColor = a.getColorStateList(R.styleable.CardView_cardBackgroundColor)
+                ?: ColorStateList.valueOf(Color.TRANSPARENT)
         }
+
+        sight = a.getInt(R.styleable.CardView_cardSight, 0)
+
+        useClipToOutline = a.getBoolean(R.styleable.CardView_cardPreventCornerOverlap, true)
+
+        val defaultPadding = a.getDimensionPixelSize(R.styleable.CardView_contentPadding, 0)
+        contentPadding.left = a.getDimensionPixelSize(
+            R.styleable.CardView_contentPaddingLeft,
+            defaultPadding
+        )
+        contentPadding.top = a.getDimensionPixelSize(
+            R.styleable.CardView_contentPaddingTop,
+            defaultPadding
+        )
+        contentPadding.right = a.getDimensionPixelSize(
+            R.styleable.CardView_contentPaddingRight,
+            defaultPadding
+        )
+        contentPadding.bottom = a.getDimensionPixelSize(
+            R.styleable.CardView_contentPaddingBottom,
+            defaultPadding
+        )
 
         a.recycle()
 
-        roundRectView.setBackgroundDrawable(
-            RoundRectDrawable(
-                backgroundColor,
-                cardCornerRadius
-            )
+        super.setPadding(
+            cardElevation,
+            cardElevation,
+            cardElevation,
+            cardElevation
         )
 
     }
-
 
     override fun addView(
         child: View,
@@ -118,97 +126,101 @@ class CardView @JvmOverloads constructor(
     }
 
     private fun addViewInternal(child: View, params: ViewGroup.LayoutParams?) {
-        if (roundRectView.childCount >= 1) {
+
+        if (childCount >= 1) {
             throw IllegalStateException("Can't add more than 1 views to a CardView")
         }
 
-        roundRectView.post {
-            roundRectView.addView(child, 0, params)
-        }
-    }
-
-
-    override fun setBackground(background: Drawable?) {
-    }
-
-
-    private inner class RoundRectView(context: Context) : FrameLayout(context) {
-
-        init {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                clipToOutline = true
-            }
-            setBackgroundResource(R.color.cardview_shadow_start_color)
+        val layoutParams = params ?: LayoutParams(-2, -1)
+        if (layoutParams is LayoutParams) {
+            layoutParams.gravity = Gravity.CENTER
         }
 
-        override fun addView(child: View?, index: Int, params: ViewGroup.LayoutParams?) {
-            if (childCount >= 1) {
-                throw IllegalStateException("Can't add more than 1 views to a CardView")
+        when (sight) {
+            2 -> addAlongChild(child, layoutParams)
+            1 -> {
+                if (child is RoundRectView) {
+                    addRoundRectChild(child, layoutParams)
+                } else {
+                    throw IllegalStateException("Child of CardView must be wrapped with RoundRectView")
+                }
             }
-
-            if (params is MarginLayoutParams) {
-
-                val layoutParams =
-                    layoutParams ?: LayoutParams(
-                        LayoutParams.WRAP_CONTENT,
-                        LayoutParams.WRAP_CONTENT
-                    )
-
-                layoutParams.apply {
-                    if (this is LayoutParams) {
-                        this.leftMargin += params.leftMargin + cardElevation
-                        this.topMargin += params.topMargin + cardElevation
-                        this.rightMargin += params.rightMargin + cardElevation
-                        this.bottomMargin += params.bottomMargin + cardElevation
+            0 -> {
+                val roundRectView = RoundRectView(context).apply {
+                    post {
+                        addView(child, 0, params)
                     }
                 }
-
-                this.layoutParams = layoutParams
-
-                params.leftMargin = 0
-                params.topMargin = 0
-                params.rightMargin = 0
-                params.bottomMargin = 0
-
-                super.addView(child, 0, params)
+                addRoundRectChild(roundRectView, layoutParams)
             }
-
         }
     }
 
-    @SuppressLint("NewApi")
+    private fun addRoundRectChild(child: RoundRectView, layoutParams: ViewGroup.LayoutParams) {
+        super.addView(child, 0, layoutParams)
+        child.background = roundRectDrawable
+        child.clipToOutline = useClipToOutline
+        child.setContentPadding(contentPadding)
+    }
+
+
+    private fun addAlongChild(child: View, layoutParams: ViewGroup.LayoutParams) {
+        if (useClipToOutline) {
+            child.background = roundRectDrawable
+            child.clipToOutline = useClipToOutline
+        }
+        super.addView(child, 0, layoutParams)
+    }
+
+
+    override fun setPadding(left: Int, top: Int, right: Int, bottom: Int) {
+    }
+
+    override fun setPaddingRelative(start: Int, top: Int, end: Int, bottom: Int) {
+    }
+
+    override fun setBackgroundDrawable(background: Drawable?) {
+    }
+
     override fun dispatchDraw(canvas: Canvas) {
-
-        if (layerType != View.LAYER_TYPE_SOFTWARE) {
-            setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+        if (cardElevation > 0) {
+            val child = getChildAt(0)
+            child?.let {
+                val rectF = RectF(
+                    it.left.toFloat(),
+                    it.top.toFloat(),
+                    it.right.toFloat(),
+                    it.bottom.toFloat()
+                )
+                paint.color = cardShadowColor
+                paint.maskFilter =
+                    BlurMaskFilter(cardElevation.toFloat(), BlurMaskFilter.Blur.OUTER)
+                canvas.drawRoundRect(rectF, cardCornerRadius, cardCornerRadius, paint)
+            }
         }
+        super.dispatchDraw(canvas)
+    }
+}
 
-        val child = getChildAt(0)
-        val rectF = RectF(
-            child.left.toFloat() + cardElevation,
-            child.top.toFloat() + cardElevation,
-            child.right.toFloat() - cardElevation,
-            child.bottom.toFloat() - cardElevation
-        )
+class RoundRectView @JvmOverloads constructor(
+    context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
+) : FrameLayout(context, attrs, defStyleAttr) {
 
-        backgroundDrawable.setBounds(child.left, child.top, child.right, child.bottom)
-        backgroundDrawable.cornerRadius = cardCornerRadius
-        if (Build.VERSION.SDK_INT == 21) {
-            backgroundDrawable.colorFilter =
-                PorterDuffColorFilter(cardBackgroundColor, PorterDuff.Mode.SRC_IN)
-        } else {
-            DrawableCompat.setTint(backgroundDrawable, cardBackgroundColor)
+    fun setContentPadding(contentPadding: Rect) {
+        val params = layoutParams
+        if (params is MarginLayoutParams) {
+            params.leftMargin = contentPadding.left
+            params.rightMargin = contentPadding.right
+            params.topMargin = contentPadding.top
+            params.bottomMargin = contentPadding.bottom
         }
-        backgroundDrawable.draw(canvas)
-
-        paint.color = cardShadowColor
-        paint.maskFilter = BlurMaskFilter(cardElevation.toFloat(), BlurMaskFilter.Blur.OUTER)
-
-
-//        canvas.drawRoundRect(rectF, cardCornerRadius, cardCornerRadius, paint)
-
-//        super.dispatchDraw(canvas)
-
+        layoutParams = params
     }
 
+    override fun addView(child: View?, index: Int, params: ViewGroup.LayoutParams?) {
+        if (childCount >= 1) {
+            throw IllegalStateException("Can't add more than 1 views to a RoundRectView")
+        }
+        super.addView(child, 0, params)
+    }
 }
